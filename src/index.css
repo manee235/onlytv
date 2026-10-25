@@ -412,12 +412,26 @@ html, body, #root {
 }
 
 /* Overlays inside video */
-.vlc-loader-overlay,
+.vlc-loader-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(3px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  z-index: 20;
+  pointer-events: none;
+  animation: fadeIn 0.2s ease-out;
+}
+
 .vlc-error-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(16, 18, 23, 0.85);
-  backdrop-filter: blur(8px);
+  background: rgba(16, 18, 23, 0.92);
+  backdrop-filter: blur(12px);
   display: flex;
   flex-direction: column;
   align-items: center;

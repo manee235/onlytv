@@ -83,8 +83,9 @@ export default function VlcPlayer({
       hlsRef.current = null;
     }
 
-    // Always route through stream proxy to eliminate CORS & redirect issues
-    const streamUrl = getProxiedStreamUrl(channel.url);
+    // Dynamic stream URL based on environment (direct CDN on web, /api/proxy on localhost)
+    let streamUrl = getProxiedStreamUrl(channel.url);
+    let attemptedProxyFallback = false;
 
     const isHlsStream = streamUrl.includes('.m3u8') || 
                         streamUrl.includes('/hls') || 
@@ -108,9 +109,10 @@ export default function VlcPlayer({
       // Configure buffer parameters based on VLC caching mode
       const isLow = cachingMode === 'low';
       const isHigh = cachingMode === 'high';
-      const bufferLen = isLow ? 2 : isHigh ? 16 : 6;
-      const maxBufferLen = isLow ? 5 : isHigh ? 25 : 12;
-      const syncCount = isLow ? 1 : isHigh ? 3 : 2;
+      // Balanced healthy buffer thresholds: eliminates buffer starvation on live chunks
+      const bufferLen = isLow ? 10 : isHigh ? 32 : 20;
+      const maxBufferLen = isLow ? 20 : isHigh ? 64 : 40;
+      const syncCount = isLow ? 2 : isHigh ? 4 : 3;
 
       const hls = new Hls({
         enableWorker: true,
@@ -119,12 +121,12 @@ export default function VlcPlayer({
         // VLC-Style Rapid Caching Configuration
         maxBufferLength: bufferLen,
         maxMaxBufferLength: maxBufferLen,
-        maxBufferSize: 25 * 1000 * 1000,
-        maxBufferHole: 0.3,
+        maxBufferSize: 50 * 1000 * 1000,
+        maxBufferHole: 0.5,
         
-        // Start playback as soon as 1 chunk is cached instead of waiting 30s
+        // Live sync cushion: 2-3 segments ensures playback never starves while encoder writes
         liveSyncDurationCount: syncCount,
-        liveMaxLatencyDurationCount: 3,
+        liveMaxLatencyDurationCount: 8,
         
         // Progressive demuxing & parallel prefetching for zero-latency start
         progressive: true,
@@ -132,16 +134,21 @@ export default function VlcPlayer({
         testBandwidth: false,
         initialLiveManifestSize: 1,
         autoStartLoad: true,
-        backBufferLength: 4,
+        backBufferLength: 10,
         
-        manifestLoadingTimeOut: 10000,
-        manifestLoadingMaxRetry: 5,
-        manifestLoadingRetryDelay: 300,
-        levelLoadingTimeOut: 10000,
-        levelLoadingMaxRetry: 5,
-        fragLoadingTimeOut: 12000,
-        fragLoadingMaxRetry: 5,
-        fragLoadingRetryDelay: 300
+        // Fast watchdog and playhead nudge on packet gap
+        highBufferWatchdogPeriod: 2,
+        nudgeOffset: 0.2,
+        nudgeMaxRetry: 10,
+        
+        manifestLoadingTimeOut: 12000,
+        manifestLoadingMaxRetry: 4,
+        manifestLoadingRetryDelay: 500,
+        levelLoadingTimeOut: 12000,
+        levelLoadingMaxRetry: 4,
+        fragLoadingTimeOut: 15000,
+        fragLoadingMaxRetry: 4,
+        fragLoadingRetryDelay: 500
       });
 
       hls.loadSource(streamUrl);
@@ -185,6 +192,17 @@ export default function VlcPlayer({
         console.warn('Fatal HLS error:', data.type, data.details);
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
+            // If direct stream URL failed on web deployment, automatically failover to proxy!
+            if (!attemptedProxyFallback) {
+              attemptedProxyFallback = true;
+              const fallbackUrl = getProxiedStreamUrl(channel.url, true);
+              if (fallbackUrl !== streamUrl) {
+                console.log('Direct stream CORS error on web, switching to fallback proxy:', fallbackUrl);
+                hls.loadSource(fallbackUrl);
+                hls.startLoad();
+                return;
+              }
+            }
             console.log('Attempting VLC network recovery...');
             hls.startLoad();
             break;
@@ -223,10 +241,19 @@ export default function VlcPlayer({
     const video = videoRef.current;
     if (!video) return;
 
+    let waitTimer = null;
+
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
-    const onWaiting = () => setIsBuffering(true);
+    const onWaiting = () => {
+      clearTimeout(waitTimer);
+      // Debounce buffering: only show spinner if stalled for more than 400ms
+      waitTimer = setTimeout(() => {
+        setIsBuffering(true);
+      }, 400);
+    };
     const onPlaying = () => {
+      clearTimeout(waitTimer);
       setIsBuffering(false);
       setHasError(false);
     };
@@ -240,7 +267,12 @@ export default function VlcPlayer({
       if (video.buffered && video.buffered.length > 0) {
         for (let i = 0; i < video.buffered.length; i++) {
           if (video.buffered.start(i) <= video.currentTime && video.currentTime <= video.buffered.end(i)) {
-            setBufferHealth(video.buffered.end(i) - video.currentTime);
+            const ahead = video.buffered.end(i) - video.currentTime;
+            setBufferHealth(ahead);
+            if (ahead > 0.4) {
+              clearTimeout(waitTimer);
+              setIsBuffering(false);
+            }
             break;
           }
         }
@@ -248,6 +280,7 @@ export default function VlcPlayer({
     };
     const onError = () => {
       if (!hlsRef.current && video.src) {
+        clearTimeout(waitTimer);
         setIsBuffering(false);
         setHasError(true);
         setErrorMessage('Channel stream offline or unavailable.');
@@ -262,6 +295,7 @@ export default function VlcPlayer({
     video.addEventListener('error', onError);
 
     return () => {
+      clearTimeout(waitTimer);
       video.removeEventListener('play', onPlay);
       video.removeEventListener('pause', onPause);
       video.removeEventListener('waiting', onWaiting);

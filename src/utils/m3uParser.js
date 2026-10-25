@@ -128,13 +128,32 @@ export function unwrapStreamUrl(url) {
 }
 
 /**
- * Returns a proxy URL that bypasses CORS restrictions
+ * Detects if the app is currently running in local development mode
  */
-export function getProxiedStreamUrl(streamUrl) {
+export function isLocalEnvironment() {
+  if (typeof window === 'undefined') return true;
+  return window.location.hostname === 'localhost' || 
+         window.location.hostname === '127.0.0.1' ||
+         window.location.hostname === '[::1]';
+}
+
+/**
+ * Returns the best stream URL for the current environment.
+ * In local dev: routes through local streaming proxy.
+ * On deployed web: uses direct CDN stream for 0ms latency and maximum speed,
+ * falling back to proxy if requested.
+ */
+export function getProxiedStreamUrl(streamUrl, forceProxy = false) {
   if (!streamUrl) return "";
   const cleanUrl = unwrapStreamUrl(streamUrl);
   if (!cleanUrl) return "";
-  return `/api/proxy?url=${encodeURIComponent(cleanUrl)}`;
+
+  if (isLocalEnvironment() || forceProxy) {
+    return `/api/proxy?url=${encodeURIComponent(cleanUrl)}`;
+  }
+
+  // Deployed web: use direct stream URL for native CDN edge speed & zero buffering
+  return cleanUrl;
 }
 
 /**
@@ -255,8 +274,45 @@ export async function fetchPlaylistFromUrl(url) {
   }
 
   const isDirectStream = /\.(m3u8|mp4|webm|mkv|avi|mov)($|\?)/i.test(url);
+  const isLocal = isLocalEnvironment();
 
-  // Strategy 1: Local server proxy /api/proxy (fastest & handles all CORS!)
+  // If on deployed web, try direct fetch first (GitHub, CDN, open CORS streams load in <300ms)
+  if (!isLocal) {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Accept: "*/*" }
+      });
+
+      if (res.ok) {
+        const text = await res.text();
+        if (text.includes("#EXTM3U") || text.includes("#EXTINF") || !isDirectStream) {
+          const channels = parseM3U(text, url);
+          if (channels.length > 0) {
+            return { channels, raw: text, isDirect: true };
+          }
+        }
+        if (isDirectStream) {
+          return {
+            channels: [{
+              id: "direct-stream-1",
+              name: extractStreamName(url),
+              url: url,
+              group: "Live Stream",
+              quality: "LIVE",
+              logo: ""
+            }],
+            raw: text,
+            isDirect: true
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("Direct fetch on web failed, trying proxy fallback:", err);
+    }
+  }
+
+  // Strategy for local dev or fallback: use /api/proxy
   try {
     const localProxyUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
     const res = await fetch(localProxyUrl, {
@@ -288,41 +344,29 @@ export async function fetchPlaylistFromUrl(url) {
       }
     }
   } catch (err) {
-    console.warn("Local proxy fetch failed, trying direct/external fallback:", err);
+    console.warn("Proxy fetch failed, trying direct fetch:", err);
   }
 
-  // Strategy 2: Direct fetch (e.g. if hosted with open CORS headers like github.io)
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      headers: { Accept: "*/*" }
-    });
+  // If in local dev and proxy failed, try direct fetch as fallback
+  if (isLocal) {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Accept: "*/*" }
+      });
 
-    if (res.ok) {
-      const text = await res.text();
-      if (text.includes("#EXTM3U") || text.includes("#EXTINF") || !isDirectStream) {
-        const channels = parseM3U(text, url);
-        if (channels.length > 0) {
-          return { channels, raw: text, isDirect: true };
+      if (res.ok) {
+        const text = await res.text();
+        if (text.includes("#EXTM3U") || text.includes("#EXTINF") || !isDirectStream) {
+          const channels = parseM3U(text, url);
+          if (channels.length > 0) {
+            return { channels, raw: text, isDirect: true };
+          }
         }
       }
-      if (isDirectStream) {
-        return {
-          channels: [{
-            id: "direct-stream-1",
-            name: extractStreamName(url),
-            url: url,
-            group: "Live Stream",
-            quality: "LIVE",
-            logo: ""
-          }],
-          raw: text,
-          isDirect: true
-        };
-      }
+    } catch {
+      // Ignored
     }
-  } catch (err) {
-    console.warn("Direct fetch failed (likely CORS), attempting external fallback:", err);
   }
 
   if (isDirectStream || url.startsWith("http")) {
