@@ -1,5 +1,5 @@
 /**
- * Robust M3U and IPTV Playlist Parser for VLC Web Player
+ * Robust M3U and IPTV Playlist Parser for OnlyTV Web Player
  */
 
 export const DEFAULT_IPTV_URL = "https://iptv-org.github.io/iptv/index.m3u";
@@ -98,16 +98,43 @@ export const DEMO_CHANNELS = [
 ];
 
 /**
+ * Cleanly unwrap and return a stream URL without nested proxy paths
+ */
+export function unwrapStreamUrl(url) {
+  if (!url) return "";
+  let clean = url.trim();
+
+  // If URL has an embedded /api/proxy?url=
+  const match = clean.match(/api\/proxy\?url=(.+)$/i);
+  if (match && match[1]) {
+    try {
+      clean = decodeURIComponent(match[1]);
+    } catch {
+      clean = match[1];
+    }
+  }
+
+  // If URL has corsproxy.io/?url=
+  const corsMatch = clean.match(/corsproxy\.io\/\?url=(.+)$/i);
+  if (corsMatch && corsMatch[1]) {
+    try {
+      clean = decodeURIComponent(corsMatch[1]);
+    } catch {
+      clean = corsMatch[1];
+    }
+  }
+
+  return clean;
+}
+
+/**
  * Returns a proxy URL that bypasses CORS restrictions
  */
 export function getProxiedStreamUrl(streamUrl) {
   if (!streamUrl) return "";
-  // Don't double proxy
-  if (streamUrl.startsWith("/api/proxy") || streamUrl.includes("corsproxy.io") || streamUrl.includes("allorigins")) {
-    return streamUrl;
-  }
-  // Try local dev server proxy first
-  return `/api/proxy?url=${encodeURIComponent(streamUrl)}`;
+  const cleanUrl = unwrapStreamUrl(streamUrl);
+  if (!cleanUrl) return "";
+  return `/api/proxy?url=${encodeURIComponent(cleanUrl)}`;
 }
 
 /**
@@ -184,8 +211,9 @@ export function parseM3U(m3uContent, baseUrl = "") {
       continue;
     } else {
       // It's a stream URL
-      let streamUrl = line;
+      let streamUrl = unwrapStreamUrl(line);
 
+      // Only resolve relative if baseUrl is provided AND streamUrl doesn't start with http/https
       if (baseUrl && !streamUrl.startsWith("http://") && !streamUrl.startsWith("https://")) {
         try {
           streamUrl = new URL(streamUrl, baseUrl).href;
@@ -260,7 +288,7 @@ export async function fetchPlaylistFromUrl(url) {
       }
     }
   } catch (err) {
-    console.warn("Local proxy fetch failed, trying direct/external proxy:", err);
+    console.warn("Local proxy fetch failed, trying direct/external fallback:", err);
   }
 
   // Strategy 2: Direct fetch (e.g. if hosted with open CORS headers like github.io)
@@ -295,21 +323,6 @@ export async function fetchPlaylistFromUrl(url) {
     }
   } catch (err) {
     console.warn("Direct fetch failed (likely CORS), attempting external fallback:", err);
-  }
-
-  // Strategy 3: External CORS Proxy Fallback
-  try {
-    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
-    const res = await fetch(proxyUrl);
-    if (res.ok) {
-      const text = await res.text();
-      const channels = parseM3U(text, url);
-      if (channels.length > 0) {
-        return { channels, raw: text, isProxy: true };
-      }
-    }
-  } catch (err) {
-    console.warn("External fallback failed:", err);
   }
 
   if (isDirectStream || url.startsWith("http")) {

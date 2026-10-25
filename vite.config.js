@@ -34,7 +34,7 @@ export default defineConfig({
 
             const parsedTarget = new URL(target);
 
-            // Fetch upstream stream with standard player headers
+            // Fetch upstream stream with player headers
             const upstreamRes = await fetch(target, {
               headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -49,21 +49,33 @@ export default defineConfig({
               return res.end(`Upstream returned status ${upstreamRes.status}`);
             }
 
-            // CRITICAL: Use the final URL after all HTTP 301/302 redirects!
             const finalUrl = upstreamRes.url || target;
             const contentType = upstreamRes.headers.get('content-type') || '';
-            const isM3u8 = contentType.includes('mpegurl') || 
-                           contentType.includes('application/x-mpegURL') || 
-                           finalUrl.includes('.m3u8') || 
-                           finalUrl.includes('.m3u') ||
-                           target.includes('.m3u8') || 
-                           target.includes('.m3u');
+            const isM3u = contentType.includes('mpegurl') || 
+                          contentType.includes('application/x-mpegURL') || 
+                          finalUrl.includes('.m3u8') || 
+                          finalUrl.includes('.m3u') ||
+                          target.includes('.m3u8') || 
+                          target.includes('.m3u');
 
-            if (isM3u8) {
-              res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            if (isM3u) {
               const text = await upstreamRes.text();
 
-              // Rewrite every relative and absolute media/segment URL to go back through /api/proxy
+              // IMPORTANT: An IPTV channel playlist (like index.m3u) has #EXTINF for thousands of channels.
+              // It is NOT an HLS media manifest (which has #EXT-X-TARGETDURATION or #EXT-X-STREAM-INF).
+              // We must NEVER rewrite channel URLs in a playlist; only rewrite sub-playlists and .ts chunks in HLS manifests!
+              const isIptvPlaylist = text.includes('#EXTINF:') && 
+                                     !text.includes('#EXT-X-TARGETDURATION') && 
+                                     !text.includes('#EXT-X-STREAM-INF') &&
+                                     !text.includes('#EXT-X-MEDIA-SEQUENCE');
+
+              if (isIptvPlaylist) {
+                res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+                return res.end(text);
+              }
+
+              // It is an actual HLS video stream manifest: rewrite sub-playlists and .ts segments
+              res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
               const lines = text.split(/\r?\n/);
               const rewrittenLines = lines.map(line => {
                 const trimmed = line.trim();
@@ -81,12 +93,11 @@ export default defineConfig({
                   });
                 }
 
-                // Leave other comments and directives as is
                 if (trimmed.startsWith('#')) {
                   return line;
                 }
 
-                // It's a stream playlist or segment (.ts) chunk! Resolve against finalUrl
+                // Rewrite stream playlist or segment (.ts) chunk resolved against finalUrl
                 try {
                   const absoluteUrl = new URL(trimmed, finalUrl).href;
                   return `/api/proxy?url=${encodeURIComponent(absoluteUrl)}`;
