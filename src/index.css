@@ -1935,4 +1935,101 @@ html, body, #root {
   .preset-grid {
     grid-template-columns: 1fr;
   }
+
+  .show-mobile-only {
+    display: inline-flex !important;
+  }
+
+  /* Reserve space for mobile bottom app bar */
+  .vlc-main-workspace {
+    padding-bottom: 64px;
+    height: calc(100vh - var(--header-height) - 64px);
+  }
+
+  /* Mobile Bottom App Bar */
+  .onlytv-mobile-appbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 64px;
+    background: rgba(18, 20, 27, 0.96);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border-subtle);
+    z-index: 60;
+    padding: 0 0.5rem;
+    box-shadow: 0 -6px 25px rgba(0, 0, 0, 0.6);
+  }
+
+  .mobile-tab-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    font-weight: 600;
+    cursor: pointer;
+    gap: 0.2rem;
+    flex: 1;
+    padding: 0.25rem 0;
+    transition: all var(--transition-fast);
+  }
+
+  .mobile-tab-btn.active,
+  .mobile-tab-btn:hover {
+    color: var(--onlytv-blue);
+  }
+
+  .mobile-tab-icon-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mobile-tab-badge {
+    position: absolute;
+    top: -5px;
+    right: -10px;
+    background: var(--onlytv-blue);
+    color: #fff;
+    font-size: 0.62rem;
+    font-weight: 800;
+    padding: 0.05rem 0.35rem;
+    border-radius: var(--radius-full);
+    border: 1.5px solid var(--bg-primary);
+  }
+
+  .mobile-tab-btn.primary-action .action-bubble {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-full);
+    background: linear-gradient(135deg, var(--onlytv-blue), var(--onlytv-blue-dark));
+    color: #fff;
+    margin-top: -18px;
+    box-shadow: 0 4px 18px var(--onlytv-blue-glow);
+    transition: transform var(--transition-fast);
+  }
+
+  .mobile-tab-btn.primary-action:hover .action-bubble {
+    transform: scale(1.08);
+  }
+
+  .mobile-tab-btn.primary-action span {
+    color: var(--onlytv-blue);
+  }
+}
+
+.show-mobile-only {
+  display: none !important;
+}
+
+.onlytv-mobile-appbar {
+  display: none;
 }

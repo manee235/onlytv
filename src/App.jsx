@@ -4,6 +4,7 @@ import VlcPlayer from './components/VlcPlayer';
 import ChannelSidebar from './components/ChannelSidebar';
 import NetworkStreamModal from './components/NetworkStreamModal';
 import MediaInfoModal from './components/MediaInfoModal';
+import MobileBottomBar from './components/MobileBottomBar';
 import { fetchPlaylistFromUrl, DEFAULT_IPTV_URL, DEMO_CHANNELS } from './utils/m3uParser';
 import { Tv, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
@@ -287,6 +288,17 @@ export default function App() {
           onOpenStreamModal={() => setIsStreamModalOpen(true)}
         />
       </main>
+
+      {/* Mobile Responsive Bottom App Bar */}
+      <MobileBottomBar 
+        onTogglePlaylist={() => setIsPlaylistOpen(prev => !prev)}
+        isPlaylistOpen={isPlaylistOpen}
+        onOpenStreamModal={() => setIsStreamModalOpen(true)}
+        onOpenInfoModal={() => setIsInfoModalOpen(true)}
+        onNextChannel={handleNextChannel}
+        onTakeSnapshot={handleTakeSnapshot}
+        channelCount={channels.length}
+      />
 
       {/* Modals */}
       <NetworkStreamModal 

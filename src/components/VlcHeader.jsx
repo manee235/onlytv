@@ -65,7 +65,7 @@ export default function VlcHeader({
         <div className="vlc-brand">
           <img src={appLogo} alt="OnlyTV Logo" className="onlytv-brand-logo" />
           <span className="vlc-title">OnlyTV</span>
-          <span className="vlc-badge">Live Stream</span>
+          <span className="vlc-badge hide-mobile">Live Stream</span>
         </div>
 
         {/* Quick Top Actions */}
@@ -76,31 +76,36 @@ export default function VlcHeader({
             title="Open Network Stream or M3U Playlist (Ctrl+N)"
           >
             <Globe size={15} />
-            <span>Open Network Stream</span>
+            <span className="hide-mobile">Open Network Stream</span>
+            <span className="show-mobile-only">Stream</span>
           </button>
 
           <button 
-            className="vlc-quick-btn secondary"
+            className="vlc-quick-btn secondary hide-mobile"
             onClick={onOpenSampleModal}
             title="Explore Free IPTV Channels"
           >
-            <Sparkles size={15} className="text-orange" />
-            <span className="hide-mobile">Free Channels</span>
+            <Sparkles size={15} className="text-blue" />
+            <span>Curated</span>
           </button>
 
           <button 
             className={`vlc-quick-btn icon-only ${isPlaylistOpen ? 'active' : ''}`}
             onClick={onTogglePlaylist}
-            title="Toggle Playlist Sidebar (L)"
+            title="Toggle Playlist Channels (L)"
           >
-            <List size={17} />
-            {channelCount > 0 && <span className="channel-pill">{channelCount}</span>}
+            <List size={18} />
+            {channelCount > 0 && (
+              <span className="channel-pill">
+                {channelCount > 999 ? '999+' : channelCount}
+              </span>
+            )}
           </button>
         </div>
       </div>
 
-      {/* Classic VLC Menu Bar */}
-      <nav className="vlc-menubar">
+      {/* Classic VLC / Desktop Menu Bar */}
+      <nav className="vlc-menubar hide-mobile">
         {/* Media Menu */}
         <div className="vlc-menu-item">
           <button 

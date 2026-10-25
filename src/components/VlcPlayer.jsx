@@ -16,9 +16,9 @@ import {
   AlertCircle, 
   RefreshCw, 
   Tv, 
-  ShieldCheck,
-  List,
-  Layers
+  ShieldCheck, 
+  List, 
+  Layers 
 } from 'lucide-react';
 import appLogo from '../assets/Cyan Blue Winged Play Logo.png';
 import { getProxiedStreamUrl } from '../utils/m3uParser';
@@ -51,19 +51,7 @@ export default function VlcPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [snapshotFlash, setSnapshotFlash] = useState(false);
-  const [autoSkipCountdown, setAutoSkipCountdown] = useState(null);
-
   const hideTimeoutRef = useRef(null);
-  const autoSkipTimerRef = useRef(null);
-
-  // Clear auto-skip timer if user changes channel or plays
-  const clearAutoSkip = () => {
-    if (autoSkipTimerRef.current) {
-      clearInterval(autoSkipTimerRef.current);
-      autoSkipTimerRef.current = null;
-    }
-    setAutoSkipCountdown(null);
-  };
 
   // Initialize and load stream
   useEffect(() => {
@@ -72,7 +60,6 @@ export default function VlcPlayer({
     const video = videoRef.current;
     if (!video) return;
 
-    clearAutoSkip();
     setHasError(false);
     setErrorMessage('');
     setIsBuffering(true);
@@ -92,7 +79,6 @@ export default function VlcPlayer({
 
     const attemptAutoplay = () => {
       video.play().catch(err => {
-        // Autoplay policy prevented unmuted playback
         console.warn('Autoplay unmuted blocked by browser policy, switching to muted autoplay:', err);
         video.muted = true;
         setIsMuted(true);
@@ -108,12 +94,15 @@ export default function VlcPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
-        backBufferLength: 60,
-        manifestLoadingTimeOut: 15000,
-        manifestLoadingMaxRetry: 3,
-        levelLoadingTimeOut: 15000,
-        fragLoadingTimeOut: 20000,
-        fragLoadingMaxRetry: 3
+        backBufferLength: 90,
+        manifestLoadingTimeOut: 25000,
+        manifestLoadingMaxRetry: 6,
+        manifestLoadingRetryDelay: 1000,
+        levelLoadingTimeOut: 25000,
+        levelLoadingMaxRetry: 6,
+        fragLoadingTimeOut: 30000,
+        fragLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 1000
       });
 
       hls.loadSource(streamUrl);
@@ -121,6 +110,7 @@ export default function VlcPlayer({
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsBuffering(false);
+        setHasError(false);
         attemptAutoplay();
       });
 
@@ -132,26 +122,26 @@ export default function VlcPlayer({
       });
 
       hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.fatal) {
-          console.warn('HLS stream error:', data.type, data.details);
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              setErrorMessage('Broadcast feed is currently offline, geoblocked, or not responding.');
-              setHasError(true);
-              setIsBuffering(false);
-              triggerAutoSkip();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              setErrorMessage('Broadcast source unavailable.');
-              setHasError(true);
-              setIsBuffering(false);
-              hls.destroy();
-              triggerAutoSkip();
-              break;
-          }
+        // If error is not fatal, let Hls.js handle it internally
+        if (!data.fatal) return;
+
+        console.warn('Fatal HLS error:', data.type, data.details);
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            // Attempt to recover network error first before giving up
+            console.log('Attempting HLS network error recovery...');
+            hls.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            console.log('Attempting HLS media error recovery...');
+            hls.recoverMediaError();
+            break;
+          default:
+            setErrorMessage('This channel broadcast is currently offline or geoblocked.');
+            setHasError(true);
+            setIsBuffering(false);
+            hls.destroy();
+            break;
         }
       });
 
@@ -165,29 +155,12 @@ export default function VlcPlayer({
     }
 
     return () => {
-      clearAutoSkip();
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
   }, [channel]);
-
-  // Auto skip to next working channel after 4 seconds if dead stream
-  const triggerAutoSkip = () => {
-    clearAutoSkip();
-    let secondsLeft = 4;
-    setAutoSkipCountdown(secondsLeft);
-
-    autoSkipTimerRef.current = setInterval(() => {
-      secondsLeft -= 1;
-      setAutoSkipCountdown(secondsLeft);
-      if (secondsLeft <= 0) {
-        clearAutoSkip();
-        onNextChannel();
-      }
-    }, 1000);
-  };
 
   // Video event listeners
   useEffect(() => {
@@ -199,7 +172,6 @@ export default function VlcPlayer({
     const onWaiting = () => setIsBuffering(true);
     const onPlaying = () => {
       setIsBuffering(false);
-      clearAutoSkip();
       setHasError(false);
     };
     const onTimeUpdate = () => {
@@ -209,10 +181,13 @@ export default function VlcPlayer({
       }
     };
     const onError = () => {
-      setIsBuffering(false);
-      setHasError(true);
-      setErrorMessage('Channel stream offline or unavailable.');
-      triggerAutoSkip();
+      // Only handle native video error if HLS is NOT attached,
+      // avoiding false positive native video errors during HLS teardown
+      if (!hlsRef.current && video.src) {
+        setIsBuffering(false);
+        setHasError(true);
+        setErrorMessage('Channel stream offline or unavailable.');
+      }
     };
 
     video.addEventListener('play', onPlay);
@@ -348,7 +323,7 @@ export default function VlcPlayer({
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const link = document.createElement('a');
-      link.download = `vlc-snapshot-${channel?.name?.replace(/[^a-z0-9]/gi, '_') || 'stream'}-${Date.now()}.png`;
+      link.download = `onlytv-snapshot-${channel?.name?.replace(/[^a-z0-9]/gi, '_') || 'stream'}-${Date.now()}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
 
@@ -399,6 +374,7 @@ export default function VlcPlayer({
             className="vlc-video-element"
             style={getAspectRatioStyle()}
             playsInline
+            webkit-playsinline="true"
             crossOrigin="anonymous"
           />
         ) : (
@@ -422,45 +398,37 @@ export default function VlcPlayer({
         {/* Browser Autoplay Muted Floating Prompt */}
         {needsUserUnmute && !hasError && (
           <div className="vlc-unmute-prompt" onClick={handleUserUnmute}>
-            <VolumeX size={18} className="text-orange" />
-            <span>Audio Muted (Browser Autoplay) — Tap to Unmute</span>
+            <VolumeX size={18} className="text-blue" />
+            <span>Audio Muted — Tap to Unmute</span>
           </div>
         )}
 
-        {/* Error Notification Overlay with Auto-Skip Countdown */}
+        {/* Error Notification Overlay */}
         {hasError && (
           <div className="vlc-error-overlay">
             <AlertCircle size={38} className="text-red" />
             <h3>Broadcast Unavailable</h3>
             <p>{errorMessage}</p>
-            {autoSkipCountdown !== null && (
-              <p className="auto-skip-notice">
-                Auto-skipping to next channel in <strong>{autoSkipCountdown}s</strong>...
-              </p>
-            )}
             <div className="vlc-error-actions">
               <button 
                 className="vlc-btn primary"
-                onClick={() => {
-                  clearAutoSkip();
-                  onNextChannel();
-                }}
+                onClick={onNextChannel}
               >
-                <SkipForward size={15} /> Skip to Next Channel Now
+                <SkipForward size={15} /> Skip to Next Channel
               </button>
               <button 
                 className="vlc-btn secondary"
                 onClick={() => {
-                  clearAutoSkip();
-                  const video = videoRef.current;
-                  if (video) {
-                    setHasError(false);
-                    setIsBuffering(true);
-                    video.load();
+                  setHasError(false);
+                  setIsBuffering(true);
+                  if (hlsRef.current) {
+                    hlsRef.current.startLoad();
+                  } else if (videoRef.current) {
+                    videoRef.current.load();
                   }
                 }}
               >
-                <RefreshCw size={15} /> Reconnect
+                <RefreshCw size={15} /> Retry
               </button>
             </div>
           </div>
@@ -492,9 +460,9 @@ export default function VlcPlayer({
                 </div>
                 <div className="channel-sub-row">
                   <span className="channel-group">{channel.group || 'Live TV'}</span>
-                  <span className="proxy-indicator" title="VLC Stream Proxy prevents CORS & domain blocking">
+                  <span className="proxy-indicator">
                     <ShieldCheck size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 2 }} />
-                    VLC Anti-CORS Active
+                    Anti-CORS Active
                   </span>
                 </div>
               </div>
@@ -521,7 +489,7 @@ export default function VlcPlayer({
               <div className="live-pill">
                 <span className="live-dot"></span> LIVE BROADCAST
               </div>
-              <div className="live-channel-current">{channel?.name || 'VLC Web Player'}</div>
+              <div className="live-channel-current">{channel?.name || 'OnlyTV'}</div>
             </div>
           ) : (
             <div className="vlc-seek-wrapper">
