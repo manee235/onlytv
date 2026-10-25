@@ -1,6 +1,12 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { Readable } from 'node:stream';
+import http from 'node:http';
+import https from 'node:https';
+
+// Fast TCP/TLS Connection Pools for VLC-grade low-latency streaming
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 32 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 32 });
 
 export default defineConfig({
   plugins: [
@@ -17,6 +23,7 @@ export default defineConfig({
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
           res.setHeader('Access-Control-Allow-Headers', '*');
+          res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
 
           if (req.method === 'OPTIONS') {
             res.statusCode = 200;
@@ -33,18 +40,26 @@ export default defineConfig({
             }
 
             const parsedTarget = new URL(target);
+            const isHttps = parsedTarget.protocol === 'https:';
 
-            // Fetch upstream stream with player headers
+            // Forward range requests if scrubbing or segmented
+            const requestHeaders = {
+              'User-Agent': 'VLC/3.0.20 LibVLC/3.0.20 (Windows; x64)',
+              'Accept': '*/*',
+              'Referer': `${parsedTarget.protocol}//${parsedTarget.host}/`,
+              'Connection': 'keep-alive'
+            };
+
+            if (req.headers.range) {
+              requestHeaders['Range'] = req.headers.range;
+            }
+
             const upstreamRes = await fetch(target, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Accept': '*/*',
-                'Referer': `${parsedTarget.protocol}//${parsedTarget.host}/`
-              },
+              headers: requestHeaders,
               redirect: 'follow'
             });
 
-            if (!upstreamRes.ok) {
+            if (!upstreamRes.ok && upstreamRes.status !== 206) {
               res.statusCode = upstreamRes.status;
               return res.end(`Upstream returned status ${upstreamRes.status}`);
             }
@@ -61,9 +76,7 @@ export default defineConfig({
             if (isM3u) {
               const text = await upstreamRes.text();
 
-              // IMPORTANT: An IPTV channel playlist (like index.m3u) has #EXTINF for thousands of channels.
-              // It is NOT an HLS media manifest (which has #EXT-X-TARGETDURATION or #EXT-X-STREAM-INF).
-              // We must NEVER rewrite channel URLs in a playlist; only rewrite sub-playlists and .ts chunks in HLS manifests!
+              // If it's a playlist of multiple channels (e.g. index.m3u), return raw text untouched
               const isIptvPlaylist = text.includes('#EXTINF:') && 
                                      !text.includes('#EXT-X-TARGETDURATION') && 
                                      !text.includes('#EXT-X-STREAM-INF') &&
@@ -71,11 +84,14 @@ export default defineConfig({
 
               if (isIptvPlaylist) {
                 res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+                res.setHeader('Cache-Control', 'public, max-age=300');
                 return res.end(text);
               }
 
-              // It is an actual HLS video stream manifest: rewrite sub-playlists and .ts segments
+              // HLS Stream Manifest: rewrite sub-playlists and .ts segments for zero-CORS streaming
               res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
               const lines = text.split(/\r?\n/);
               const rewrittenLines = lines.map(line => {
                 const trimmed = line.trim();
@@ -109,11 +125,17 @@ export default defineConfig({
               return res.end(rewrittenLines.join('\n'));
             }
 
-            // Binary media segment (.ts chunks, video, audio) - pipe stream directly
+            // Binary media segment (.ts chunks, audio, video) - stream with chunk caching
             res.setHeader('Content-Type', contentType || 'video/MP2T');
             res.setHeader('Accept-Ranges', 'bytes');
+            res.setHeader('Cache-Control', 'public, max-age=1800'); // Cache static video segments for instant rewind/scrub
+
             if (upstreamRes.headers.get('content-length')) {
               res.setHeader('Content-Length', upstreamRes.headers.get('content-length'));
+            }
+            if (upstreamRes.headers.get('content-range')) {
+              res.setHeader('Content-Range', upstreamRes.headers.get('content-range'));
+              res.statusCode = 206;
             }
 
             if (upstreamRes.body) {

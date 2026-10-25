@@ -23,6 +23,7 @@ export default function VlcHeader({
   onOpenStreamModal,
   onOpenSampleModal,
   onOpenInfoModal,
+  onOpenEffectsModal,
   onTogglePlaylist,
   isPlaylistOpen,
   isPlaying,
@@ -202,6 +203,30 @@ export default function VlcHeader({
               <div className="divider"></div>
               <button onClick={() => { onTakeSnapshot(); closeMenu(); }}>
                 <Camera size={14} /> Snapshot Screen
+              </button>
+              <div className="divider"></div>
+              <button onClick={() => { onOpenEffectsModal(); closeMenu(); }}>
+                <Sliders size={14} /> Adjustments & Effects... <span className="shortcut">Ctrl+E</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Tools Menu */}
+        <div className="vlc-menu-item">
+          <button 
+            className={`vlc-menu-trigger ${activeMenu === 'tools' ? 'active' : ''}`}
+            onClick={() => toggleMenu('tools')}
+          >
+            Tools <ChevronDown size={12} />
+          </button>
+          {activeMenu === 'tools' && (
+            <div className="vlc-dropdown-menu">
+              <button onClick={() => { onOpenEffectsModal(); closeMenu(); }}>
+                <Sliders size={14} /> Effects and Filters... <span className="shortcut">Ctrl+E</span>
+              </button>
+              <button onClick={() => { onOpenInfoModal(); closeMenu(); }}>
+                <Info size={14} /> Media Information... <span className="shortcut">Ctrl+I</span>
               </button>
             </div>
           )}

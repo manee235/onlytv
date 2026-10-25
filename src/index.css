@@ -2039,3 +2039,299 @@ html, body, #root {
 .onlytv-mobile-appbar {
   display: none;
 }
+
+/* ==========================================================================
+   VLC Effects & Adjustments Modal (Ctrl+E)
+   ========================================================================== */
+.effects-modal {
+  max-width: 580px;
+  width: 95vw;
+}
+
+.effects-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.section-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* VLC Caching Options Grid */
+.caching-options-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 600px) {
+  .caching-options-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.caching-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.caching-card:hover {
+  border-color: var(--border-bright);
+  background: var(--bg-tertiary);
+  transform: translateY(-2px);
+}
+
+.caching-card.active {
+  border-color: var(--onlytv-blue);
+  background: rgba(33, 105, 255, 0.08);
+  box-shadow: 0 0 0 1px var(--onlytv-blue), 0 4px 18px var(--onlytv-blue-glow);
+}
+
+.caching-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.caching-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.caching-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  background: var(--onlytv-blue);
+  color: #fff;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-full);
+}
+
+.caching-card.active .caching-badge {
+  background: var(--onlytv-cyan);
+  color: #0b1120;
+}
+
+.caching-card p {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  margin: 0;
+}
+
+/* VLC Video Sliders Stack */
+.sliders-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.1rem;
+}
+
+.effect-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.effect-slider-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.effect-val {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  color: var(--onlytv-cyan);
+  font-weight: 700;
+  background: rgba(56, 189, 248, 0.1);
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-sm);
+}
+
+/* Custom VLC Range Slider */
+.vlc-range-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.vlc-range-slider:hover {
+  background: var(--border-bright);
+}
+
+.vlc-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--onlytv-blue);
+  box-shadow: 0 0 8px var(--onlytv-blue-glow);
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+
+.vlc-range-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+  background: var(--onlytv-cyan);
+}
+
+.vlc-range-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: var(--onlytv-blue);
+  box-shadow: 0 0 8px var(--onlytv-blue-glow);
+  cursor: pointer;
+}
+
+/* Quick Caching Pill on Player Overlay */
+.caching-quick-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: rgba(16, 18, 23, 0.85);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  backdrop-filter: blur(8px);
+}
+
+.caching-quick-pill:hover {
+  background: var(--bg-elevated);
+  border-color: var(--onlytv-blue);
+  color: #fff;
+  transform: scale(1.04);
+}
+
+/* Buffer Health Pill */
+.buffer-health-pill {
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 0.18rem 0.5rem;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+}
+
+/* Buffer Speed Badge in Loader Overlay */
+.buffer-speed-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-main);
+  background: rgba(16, 18, 23, 0.88);
+  border: 1px solid var(--border-subtle);
+  padding: 0.35rem 0.85rem;
+  border-radius: var(--radius-full);
+  backdrop-filter: blur(10px);
+  margin-top: 0.6rem;
+}
+
+/* VLC Quality Dropdown Popover */
+.quality-selector-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.quality-dropdown-popover {
+  position: absolute;
+  bottom: 120%;
+  right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  padding: 0.4rem;
+  min-width: 140px;
+  z-index: 70;
+  backdrop-filter: blur(16px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.quality-dropdown-popover button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.quality-dropdown-popover button:hover {
+  background: var(--bg-elevated);
+  color: #fff;
+}
+
+.quality-dropdown-popover button.active {
+  background: var(--onlytv-blue);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* Text Accent Utilities */
+.text-green { color: #10b981 !important; }
+.text-blue { color: var(--onlytv-blue) !important; }
+.text-amber { color: #f59e0b !important; }
+.text-red { color: #ef4444 !important; }
+

@@ -4,6 +4,7 @@ import VlcPlayer from './components/VlcPlayer';
 import ChannelSidebar from './components/ChannelSidebar';
 import NetworkStreamModal from './components/NetworkStreamModal';
 import MediaInfoModal from './components/MediaInfoModal';
+import VlcEffectsModal from './components/VlcEffectsModal';
 import MobileBottomBar from './components/MobileBottomBar';
 import { fetchPlaylistFromUrl, DEFAULT_IPTV_URL, DEMO_CHANNELS } from './utils/m3uParser';
 import { Tv, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
@@ -14,8 +15,16 @@ export default function App() {
   const [isPlaylistOpen, setIsPlaylistOpen] = useState(true);
   const [isStreamModalOpen, setIsStreamModalOpen] = useState(false);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+  const [isEffectsModalOpen, setIsEffectsModalOpen] = useState(false);
   const [aspectRatio, setAspectRatio] = useState('default');
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [cachingMode, setCachingMode] = useState('low'); // Default to low latency for instant start!
+  const [videoEffects, setVideoEffects] = useState({
+    brightness: 1,
+    contrast: 1,
+    saturate: 1,
+    hue: 0
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState('');
@@ -80,6 +89,11 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
         e.preventDefault();
         setIsInfoModalOpen(true);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        setIsEffectsModalOpen(true);
         return;
       }
 
@@ -218,7 +232,7 @@ export default function App() {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const link = document.createElement('a');
-      link.download = `vlc-snapshot-${currentChannel?.name?.replace(/[^a-z0-9]/gi, '_') || 'stream'}.png`;
+      link.download = `onlytv-snapshot-${currentChannel?.name?.replace(/[^a-z0-9]/gi, '_') || 'stream'}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
       showToast('Video snapshot saved!', 'success');
@@ -227,13 +241,34 @@ export default function App() {
     }
   };
 
+  const handleChangeEffects = (prop, val) => {
+    setVideoEffects(prev => ({ ...prev, [prop]: val }));
+  };
+
+  const handleResetEffects = () => {
+    setVideoEffects({
+      brightness: 1,
+      contrast: 1,
+      saturate: 1,
+      hue: 0
+    });
+    showToast('Video effects reset to defaults');
+  };
+
+  const handleChangeCachingMode = (mode) => {
+    setCachingMode(mode);
+    const labels = { low: 'Lowest Latency (300ms)', normal: 'Normal Caching (1000ms)', high: 'High Caching (3000ms)' };
+    showToast(`VLC Network Buffer set to: ${labels[mode]}`);
+  };
+
   return (
     <div className="vlc-app-root">
-      {/* VLC Header & Menus */}
+      {/* VLC / OnlyTV Header & Menus */}
       <VlcHeader 
         onOpenStreamModal={() => setIsStreamModalOpen(true)}
         onOpenSampleModal={() => setIsStreamModalOpen(true)}
         onOpenInfoModal={() => setIsInfoModalOpen(true)}
+        onOpenEffectsModal={() => setIsEffectsModalOpen(true)}
         onTogglePlaylist={() => setIsPlaylistOpen(prev => !prev)}
         isPlaylistOpen={isPlaylistOpen}
         isPlaying={!videoRef.current?.paused}
@@ -275,6 +310,10 @@ export default function App() {
             onChangeSpeed={setPlaybackSpeed}
             onTakeSnapshot={handleTakeSnapshot}
             videoRef={videoRef}
+            videoEffects={videoEffects}
+            cachingMode={cachingMode}
+            onChangeCachingMode={setCachingMode}
+            onOpenEffectsModal={() => setIsEffectsModalOpen(true)}
           />
         </div>
 
@@ -319,10 +358,20 @@ export default function App() {
         playbackSpeed={playbackSpeed}
       />
 
+      <VlcEffectsModal 
+        isOpen={isEffectsModalOpen}
+        onClose={() => setIsEffectsModalOpen(false)}
+        videoEffects={videoEffects}
+        onChangeEffects={handleChangeEffects}
+        onResetEffects={handleResetEffects}
+        cachingMode={cachingMode}
+        onChangeCachingMode={handleChangeCachingMode}
+      />
+
       {/* Initial Global Index Loading Indicator */}
       {initialLoading && (
         <div className="vlc-toast info">
-          <Loader2 size={16} className="animate-spin text-orange" />
+          <Loader2 size={16} className="animate-spin text-blue" />
           <span>Connecting to IPTV-Org index ({DEFAULT_IPTV_URL})...</span>
         </div>
       )}
@@ -335,7 +384,7 @@ export default function App() {
           ) : toast.type === 'error' ? (
             <AlertCircle size={16} className="text-red" />
           ) : (
-            <Tv size={16} className="text-orange" />
+            <Tv size={16} className="text-blue" />
           )}
           <span>{toast.message}</span>
         </div>

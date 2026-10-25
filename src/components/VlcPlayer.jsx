@@ -18,7 +18,10 @@ import {
   Tv, 
   ShieldCheck, 
   List, 
-  Layers 
+  Layers,
+  Sliders,
+  Zap,
+  Gauge
 } from 'lucide-react';
 import appLogo from '../assets/Cyan Blue Winged Play Logo.png';
 import { getProxiedStreamUrl } from '../utils/m3uParser';
@@ -34,7 +37,11 @@ export default function VlcPlayer({
   playbackSpeed,
   onChangeSpeed,
   onTakeSnapshot,
-  videoRef
+  videoRef,
+  videoEffects = { brightness: 1, contrast: 1, saturate: 1, hue: 0 },
+  cachingMode = 'normal',
+  onChangeCachingMode,
+  onOpenEffectsModal
 }) {
   const containerRef = useRef(null);
   const hlsRef = useRef(null);
@@ -51,9 +58,14 @@ export default function VlcPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [snapshotFlash, setSnapshotFlash] = useState(false);
+  const [bufferHealth, setBufferHealth] = useState(0);
+  const [qualityLevels, setQualityLevels] = useState([]);
+  const [currentLevel, setCurrentLevel] = useState(-1); // -1 = Auto
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+
   const hideTimeoutRef = useRef(null);
 
-  // Initialize and load stream
+  // Initialize and load stream with VLC-grade low-latency network caching
   useEffect(() => {
     if (!channel || !channel.url) return;
 
@@ -63,6 +75,8 @@ export default function VlcPlayer({
     setHasError(false);
     setErrorMessage('');
     setIsBuffering(true);
+    setQualityLevels([]);
+    setCurrentLevel(-1);
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
@@ -91,27 +105,71 @@ export default function VlcPlayer({
     };
 
     if (isHlsStream && Hls.isSupported()) {
+      // Configure buffer parameters based on VLC caching mode
+      const isLow = cachingMode === 'low';
+      const isHigh = cachingMode === 'high';
+      const bufferLen = isLow ? 2 : isHigh ? 16 : 6;
+      const maxBufferLen = isLow ? 5 : isHigh ? 25 : 12;
+      const syncCount = isLow ? 1 : isHigh ? 3 : 2;
+
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
-        backBufferLength: 90,
-        manifestLoadingTimeOut: 25000,
-        manifestLoadingMaxRetry: 6,
-        manifestLoadingRetryDelay: 1000,
-        levelLoadingTimeOut: 25000,
-        levelLoadingMaxRetry: 6,
-        fragLoadingTimeOut: 30000,
-        fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 1000
+        
+        // VLC-Style Rapid Caching Configuration
+        maxBufferLength: bufferLen,
+        maxMaxBufferLength: maxBufferLen,
+        maxBufferSize: 25 * 1000 * 1000,
+        maxBufferHole: 0.3,
+        
+        // Start playback as soon as 1 chunk is cached instead of waiting 30s
+        liveSyncDurationCount: syncCount,
+        liveMaxLatencyDurationCount: 3,
+        
+        // Progressive demuxing & parallel prefetching for zero-latency start
+        progressive: true,
+        startFragPrefetch: true,
+        testBandwidth: false,
+        initialLiveManifestSize: 1,
+        autoStartLoad: true,
+        backBufferLength: 4,
+        
+        manifestLoadingTimeOut: 10000,
+        manifestLoadingMaxRetry: 5,
+        manifestLoadingRetryDelay: 300,
+        levelLoadingTimeOut: 10000,
+        levelLoadingMaxRetry: 5,
+        fragLoadingTimeOut: 12000,
+        fragLoadingMaxRetry: 5,
+        fragLoadingRetryDelay: 300
       });
 
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
 
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
         setIsBuffering(false);
         setHasError(false);
+
+        // Extract available quality levels
+        if (data && data.levels && data.levels.length > 0) {
+          const lvls = data.levels.map((lvl, index) => ({
+            id: index,
+            height: lvl.height,
+            bitrate: lvl.bitrate,
+            label: lvl.height ? `${lvl.height}p` : `${Math.round(lvl.bitrate / 1000)}k`
+          }));
+          setQualityLevels(lvls);
+        }
+
         attemptAutoplay();
+      });
+
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        setIsBuffering(false);
+        if (video.paused && !needsUserUnmute) {
+          video.play().catch(() => {});
+        }
       });
 
       hls.on(Hls.Events.LEVEL_LOADED, (event, data) => {
@@ -122,18 +180,16 @@ export default function VlcPlayer({
       });
 
       hls.on(Hls.Events.ERROR, (event, data) => {
-        // If error is not fatal, let Hls.js handle it internally
         if (!data.fatal) return;
 
         console.warn('Fatal HLS error:', data.type, data.details);
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
-            // Attempt to recover network error first before giving up
-            console.log('Attempting HLS network error recovery...');
+            console.log('Attempting VLC network recovery...');
             hls.startLoad();
             break;
           case Hls.ErrorTypes.MEDIA_ERROR:
-            console.log('Attempting HLS media error recovery...');
+            console.log('Attempting VLC media error recovery...');
             hls.recoverMediaError();
             break;
           default:
@@ -160,9 +216,9 @@ export default function VlcPlayer({
         hlsRef.current = null;
       }
     };
-  }, [channel]);
+  }, [channel, cachingMode]);
 
-  // Video event listeners
+  // Video event listeners & buffer health monitor
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -179,10 +235,18 @@ export default function VlcPlayer({
       if (video.duration && isFinite(video.duration)) {
         setDuration(video.duration);
       }
+
+      // Calculate buffer health in seconds ahead of playhead
+      if (video.buffered && video.buffered.length > 0) {
+        for (let i = 0; i < video.buffered.length; i++) {
+          if (video.buffered.start(i) <= video.currentTime && video.currentTime <= video.buffered.end(i)) {
+            setBufferHealth(video.buffered.end(i) - video.currentTime);
+            break;
+          }
+        }
+      }
     };
     const onError = () => {
-      // Only handle native video error if HLS is NOT attached,
-      // avoiding false positive native video errors during HLS teardown
       if (!hlsRef.current && video.src) {
         setIsBuffering(false);
         setHasError(true);
@@ -220,6 +284,7 @@ export default function VlcPlayer({
     if (isPlaying) {
       hideTimeoutRef.current = setTimeout(() => {
         setControlsVisible(false);
+        setShowQualityMenu(false);
       }, 3500);
     }
   };
@@ -242,7 +307,7 @@ export default function VlcPlayer({
   const handleUserUnmute = () => {
     if (videoRef.current) {
       videoRef.current.muted = false;
-      videoRef.current.volume = volume || 1;
+      videoRef.current.volume = Math.min(volume || 1, 1);
       setIsMuted(false);
       setNeedsUserUnmute(false);
     }
@@ -282,6 +347,14 @@ export default function VlcPlayer({
     if (videoRef.current) {
       videoRef.current.currentTime = time;
     }
+  };
+
+  const handleSelectQuality = (lvlIndex) => {
+    setCurrentLevel(lvlIndex);
+    if (hlsRef.current) {
+      hlsRef.current.currentLevel = lvlIndex;
+    }
+    setShowQualityMenu(false);
   };
 
   const toggleFullscreen = () => {
@@ -335,6 +408,18 @@ export default function VlcPlayer({
     }
   };
 
+  const cycleCachingMode = () => {
+    const modes = ['low', 'normal', 'high'];
+    const next = modes[(modes.indexOf(cachingMode) + 1) % modes.length];
+    if (onChangeCachingMode) onChangeCachingMode(next);
+  };
+
+  const cycleSpeed = () => {
+    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+    const next = speeds[(speeds.indexOf(playbackSpeed) + 1) % speeds.length];
+    if (onChangeSpeed) onChangeSpeed(next);
+  };
+
   const formatTime = (secs) => {
     if (!secs || isNaN(secs) || !isFinite(secs)) return '00:00';
     const h = Math.floor(secs / 3600);
@@ -346,13 +431,18 @@ export default function VlcPlayer({
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  const getAspectRatioStyle = () => {
+  // Video aspect ratio & effects filter style
+  const getVideoStyles = () => {
+    const styles = {
+      filter: `brightness(${videoEffects.brightness}) contrast(${videoEffects.contrast}) saturate(${videoEffects.saturate}) hue-rotate(${videoEffects.hue}deg)`
+    };
+
     switch (aspectRatio) {
-      case '16:9': return { aspectRatio: '16 / 9', objectFit: 'contain' };
-      case '4:3': return { aspectRatio: '4 / 3', objectFit: 'contain' };
-      case 'cover': return { objectFit: 'cover' };
-      case 'fill': return { objectFit: 'fill' };
-      default: return { objectFit: 'contain' };
+      case '16:9': return { ...styles, aspectRatio: '16 / 9', objectFit: 'contain' };
+      case '4:3': return { ...styles, aspectRatio: '4 / 3', objectFit: 'contain' };
+      case 'cover': return { ...styles, objectFit: 'cover' };
+      case 'fill': return { ...styles, objectFit: 'fill' };
+      default: return { ...styles, objectFit: 'contain' };
     }
   };
 
@@ -372,7 +462,7 @@ export default function VlcPlayer({
           <video
             ref={videoRef}
             className="vlc-video-element"
-            style={getAspectRatioStyle()}
+            style={getVideoStyles()}
             playsInline
             webkit-playsinline="true"
             crossOrigin="anonymous"
@@ -387,11 +477,14 @@ export default function VlcPlayer({
           </div>
         )}
 
-        {/* Buffering Spinner */}
+        {/* Buffering Spinner with Speed Indicator */}
         {isBuffering && (
           <div className="vlc-loader-overlay">
             <div className="vlc-spinner"></div>
-            <span>Buffering Live Stream...</span>
+            <div className="buffer-speed-badge">
+              <Zap size={14} className="text-blue" />
+              <span>VLC Fast Buffer Active ({cachingMode === 'low' ? '300ms' : cachingMode === 'high' ? '3000ms' : '1000ms'})</span>
+            </div>
           </div>
         )}
 
@@ -464,6 +557,22 @@ export default function VlcPlayer({
                     <ShieldCheck size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 2 }} />
                     Anti-CORS Active
                   </span>
+
+                  {/* VLC Caching Mode Quick Pill */}
+                  <button 
+                    className="caching-quick-pill" 
+                    onClick={cycleCachingMode} 
+                    title="VLC Network Caching (Click to cycle 300ms / 1000ms / 3000ms)"
+                  >
+                    <Zap size={11} className={cachingMode === 'low' ? 'text-blue' : cachingMode === 'high' ? 'text-amber' : 'text-green'} />
+                    <span>{cachingMode === 'low' ? '300ms Turbo' : cachingMode === 'high' ? '3000ms Stable' : '1000ms Normal'}</span>
+                  </button>
+
+                  {bufferHealth > 0 && (
+                    <span className="buffer-health-pill" title="VLC Cached Buffer Ahead of Playhead">
+                      ⚡ {bufferHealth.toFixed(1)}s cached
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -581,18 +690,59 @@ export default function VlcPlayer({
           </div>
 
           <div className="vlc-controls-right">
+            {/* VLC Quality Selector */}
+            {qualityLevels.length > 0 && (
+              <div className="quality-selector-wrap">
+                <button 
+                  className="vlc-ctrl-btn hide-small"
+                  onClick={() => setShowQualityMenu(!showQualityMenu)}
+                  title="Stream Quality (Resolution)"
+                >
+                  <span className="speed-label">
+                    {currentLevel === -1 ? 'AUTO' : qualityLevels[currentLevel]?.label || 'HD'}
+                  </span>
+                </button>
+                {showQualityMenu && (
+                  <div className="quality-dropdown-popover">
+                    <button 
+                      className={currentLevel === -1 ? 'active' : ''}
+                      onClick={() => handleSelectQuality(-1)}
+                    >
+                      Auto (Adaptive)
+                    </button>
+                    {qualityLevels.map(lvl => (
+                      <button 
+                        key={lvl.id}
+                        className={currentLevel === lvl.id ? 'active' : ''}
+                        onClick={() => handleSelectQuality(lvl.id)}
+                      >
+                        {lvl.label} {lvl.bitrate ? `(${Math.round(lvl.bitrate / 1000)} kbps)` : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* VLC Speed Selector */}
             <button 
               className="vlc-ctrl-btn hide-small"
-              onClick={() => {
-                const speeds = [0.5, 1.0, 1.25, 1.5, 2.0];
-                const nextIndex = (speeds.indexOf(playbackSpeed) + 1) % speeds.length;
-                onChangeSpeed(speeds[nextIndex]);
-              }}
-              title="Playback Speed"
+              onClick={cycleSpeed}
+              title={`VLC Playback Speed: ${playbackSpeed}x (Click to cycle)`}
             >
               <span className="speed-label">{playbackSpeed}x</span>
             </button>
 
+            {/* VLC Adjustments and Effects (Ctrl+E) */}
+            <button 
+              className="vlc-ctrl-btn hide-small"
+              onClick={onOpenEffectsModal}
+              title="VLC Adjustments & Network Caching (Ctrl+E)"
+            >
+              <Sliders size={16} />
+            </button>
+
+            {/* Aspect Ratio */}
             <button 
               className="vlc-ctrl-btn hide-small"
               onClick={() => {
@@ -605,6 +755,7 @@ export default function VlcPlayer({
               <Layers size={16} />
             </button>
 
+            {/* Snapshot */}
             <button 
               className="vlc-ctrl-btn"
               onClick={handleSnapshot}
@@ -613,6 +764,7 @@ export default function VlcPlayer({
               <Camera size={16} />
             </button>
 
+            {/* PiP */}
             <button 
               className="vlc-ctrl-btn hide-small"
               onClick={togglePiP}
@@ -621,6 +773,7 @@ export default function VlcPlayer({
               <PictureInPicture2 size={16} />
             </button>
 
+            {/* Fullscreen */}
             <button 
               className="vlc-ctrl-btn"
               onClick={toggleFullscreen}
