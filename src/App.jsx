@@ -2,37 +2,34 @@ import React, { useState, useEffect, useRef } from 'react';
 import VlcHeader from './components/VlcHeader';
 import VlcPlayer from './components/VlcPlayer';
 import ChannelSidebar from './components/ChannelSidebar';
-import NetworkStreamModal from './components/NetworkStreamModal';
 import MediaInfoModal from './components/MediaInfoModal';
 import VlcEffectsModal from './components/VlcEffectsModal';
 import MobileBottomBar from './components/MobileBottomBar';
+import SplashScreen from './components/SplashScreen';
 import { fetchPlaylistFromUrl, DEFAULT_IPTV_URL, DEMO_CHANNELS } from './utils/m3uParser';
-import { Tv, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { Tv, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function App() {
   const [channels, setChannels] = useState(DEMO_CHANNELS);
   const [currentChannel, setCurrentChannel] = useState(DEMO_CHANNELS[0]);
   const [isPlaylistOpen, setIsPlaylistOpen] = useState(true);
-  const [isStreamModalOpen, setIsStreamModalOpen] = useState(false);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [isEffectsModalOpen, setIsEffectsModalOpen] = useState(false);
   const [aspectRatio, setAspectRatio] = useState('default');
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
-  const [cachingMode, setCachingMode] = useState('low'); // Default to low latency for instant start!
+  const [cachingMode, setCachingMode] = useState('low'); // Default to ultra-low latency (300ms)
   const [videoEffects, setVideoEffects] = useState({
     brightness: 1,
     contrast: 1,
     saturate: 1,
     hue: 0
   });
-  const [isLoading, setIsLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [error, setError] = useState('');
   const [toast, setToast] = useState(null);
 
   const videoRef = useRef(null);
 
-  // Auto-close sidebar on small screens initially if needed
+  // Auto-close sidebar on small screens initially for better video view
   useEffect(() => {
     if (window.innerWidth < 768) {
       setIsPlaylistOpen(false);
@@ -47,21 +44,21 @@ export default function App() {
     }, 3500);
   };
 
-  // Load the default IPTV playlist on first launch
+  // Automatically fetch and load default stream/playlist on startup without any popup
   useEffect(() => {
     let isCancelled = false;
 
-    async function loadDefaultPlaylist() {
+    async function autoLoadDefaultStream() {
       setInitialLoading(true);
       try {
         const result = await fetchPlaylistFromUrl(DEFAULT_IPTV_URL);
         if (!isCancelled && result.channels && result.channels.length > 0) {
           setChannels(result.channels);
           setCurrentChannel(result.channels[0]);
-          showToast(`Loaded ${result.channels.length.toLocaleString()} channels from IPTV-Org!`, 'success');
+          showToast(`Stream Ready: ${result.channels.length.toLocaleString()} channels connected`, 'success');
         }
       } catch (err) {
-        console.warn('Could not load full index.m3u on startup, falling back to verified channels:', err);
+        console.warn('Startup index stream fetch fallback:', err);
       } finally {
         if (!isCancelled) {
           setInitialLoading(false);
@@ -69,23 +66,18 @@ export default function App() {
       }
     }
 
-    loadDefaultPlaylist();
+    autoLoadDefaultStream();
 
     return () => {
       isCancelled = true;
     };
   }, []);
 
-  // Keyboard Shortcuts (Standard VLC Keys)
+  // Standard VLC Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        setIsStreamModalOpen(true);
-        return;
-      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
         e.preventDefault();
         setIsInfoModalOpen(true);
@@ -101,7 +93,7 @@ export default function App() {
         case ' ':
           e.preventDefault();
           if (videoRef.current) {
-            if (videoRef.current.paused) videoRef.current.play();
+            if (videoRef.current.paused) videoRef.current.play().catch(() => {});
             else videoRef.current.pause();
           }
           break;
@@ -123,10 +115,10 @@ export default function App() {
           break;
         case 'f':
           if (document.fullscreenElement) {
-            document.exitFullscreen();
+            document.exitFullscreen().catch(() => {});
           } else {
             const playerElem = document.querySelector('.vlc-player-container');
-            if (playerElem) playerElem.requestFullscreen();
+            if (playerElem) playerElem.requestFullscreen().catch(() => {});
           }
           break;
         case 'm':
@@ -143,47 +135,6 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [channels, currentChannel]);
-
-  // Load URL stream or M3U playlist
-  const handleLoadUrl = async (url, customName = '') => {
-    setIsLoading(true);
-    setError('');
-
-    try {
-      const result = await fetchPlaylistFromUrl(url);
-
-      if (result.channels && result.channels.length > 0) {
-        setChannels(result.channels);
-        setCurrentChannel(result.channels[0]);
-        setIsStreamModalOpen(false);
-        showToast(
-          `Loaded ${result.channels.length.toLocaleString()} channel${result.channels.length > 1 ? 's' : ''}!`,
-          'success'
-        );
-        if (window.innerWidth < 768) {
-          setIsPlaylistOpen(true);
-        }
-      } else {
-        setError('No valid streaming channels found in this playlist.');
-      }
-    } catch (err) {
-      console.error('Error fetching playlist:', err);
-      setError(err.message || 'Failed to load network stream. Check the URL and CORS headers.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleLoadChannels = (newChannels, sourceName = 'Uploaded Playlist') => {
-    if (newChannels && newChannels.length > 0) {
-      setChannels(newChannels);
-      setCurrentChannel(newChannels[0]);
-      showToast(`Loaded ${newChannels.length.toLocaleString()} channels from ${sourceName}`, 'success');
-      if (window.innerWidth < 768) {
-        setIsPlaylistOpen(true);
-      }
-    }
-  };
 
   const handleSelectChannel = (channel) => {
     setCurrentChannel(channel);
@@ -232,7 +183,7 @@ export default function App() {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const link = document.createElement('a');
-      link.download = `onlytv-snapshot-${currentChannel?.name?.replace(/[^a-z0-9]/gi, '_') || 'stream'}.png`;
+      link.download = `anka-snapshot-${currentChannel?.name?.replace(/[^a-z0-9]/gi, '_') || 'stream'}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
       showToast('Video snapshot saved!', 'success');
@@ -263,36 +214,14 @@ export default function App() {
 
   return (
     <div className="vlc-app-root">
-      {/* VLC / OnlyTV Header & Menus */}
+      {/* ANKA Loading Splash Screen with White Progressbar */}
+      <SplashScreen />
+
+      {/* Sleek ANKA Header */}
       <VlcHeader 
-        onOpenStreamModal={() => setIsStreamModalOpen(true)}
-        onOpenSampleModal={() => setIsStreamModalOpen(true)}
-        onOpenInfoModal={() => setIsInfoModalOpen(true)}
-        onOpenEffectsModal={() => setIsEffectsModalOpen(true)}
         onTogglePlaylist={() => setIsPlaylistOpen(prev => !prev)}
         isPlaylistOpen={isPlaylistOpen}
-        isPlaying={!videoRef.current?.paused}
-        onPlayPause={() => {
-          if (videoRef.current) {
-            if (videoRef.current.paused) videoRef.current.play();
-            else videoRef.current.pause();
-          }
-        }}
-        onStop={() => {
-          if (videoRef.current) {
-            videoRef.current.pause();
-            videoRef.current.currentTime = 0;
-          }
-        }}
-        onNextChannel={handleNextChannel}
-        onPrevChannel={handlePrevChannel}
         channelCount={channels.length}
-        currentChannel={currentChannel}
-        onTakeSnapshot={handleTakeSnapshot}
-        playbackSpeed={playbackSpeed}
-        onChangeSpeed={setPlaybackSpeed}
-        aspectRatio={aspectRatio}
-        onChangeAspectRatio={setAspectRatio}
       />
 
       {/* Main Workspace Layout */}
@@ -324,7 +253,6 @@ export default function App() {
           isOpen={isPlaylistOpen}
           onClose={() => setIsPlaylistOpen(false)}
           onClearPlaylist={handleClearPlaylist}
-          onOpenStreamModal={() => setIsStreamModalOpen(true)}
         />
       </main>
 
@@ -332,23 +260,13 @@ export default function App() {
       <MobileBottomBar 
         onTogglePlaylist={() => setIsPlaylistOpen(prev => !prev)}
         isPlaylistOpen={isPlaylistOpen}
-        onOpenStreamModal={() => setIsStreamModalOpen(true)}
         onOpenInfoModal={() => setIsInfoModalOpen(true)}
         onNextChannel={handleNextChannel}
         onTakeSnapshot={handleTakeSnapshot}
         channelCount={channels.length}
       />
 
-      {/* Modals */}
-      <NetworkStreamModal 
-        isOpen={isStreamModalOpen}
-        onClose={() => setIsStreamModalOpen(false)}
-        onLoadUrl={handleLoadUrl}
-        onLoadChannels={handleLoadChannels}
-        isLoading={isLoading}
-        error={error}
-      />
-
+      {/* Auxiliary Modals (Opened via shortcuts or menus) */}
       <MediaInfoModal 
         isOpen={isInfoModalOpen}
         onClose={() => setIsInfoModalOpen(false)}
@@ -367,14 +285,6 @@ export default function App() {
         cachingMode={cachingMode}
         onChangeCachingMode={handleChangeCachingMode}
       />
-
-      {/* Initial Global Index Loading Indicator */}
-      {initialLoading && (
-        <div className="vlc-toast info">
-          <Loader2 size={16} className="animate-spin text-blue" />
-          <span>Connecting to IPTV-Org index ({DEFAULT_IPTV_URL})...</span>
-        </div>
-      )}
 
       {/* Toast Notification */}
       {toast && (

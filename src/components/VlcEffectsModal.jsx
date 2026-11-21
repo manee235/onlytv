@@ -45,7 +45,7 @@ export default function VlcEffectsModal({
               <span>Network Caching & Buffer Engine (VLC-Grade)</span>
             </div>
             <p className="section-hint">
-              Controls how aggressively OnlyTV pre-buffers stream packets before playing:
+              Controls how aggressively ANKA pre-buffers stream packets before playing:
             </p>
 
             <div className="caching-options-grid">

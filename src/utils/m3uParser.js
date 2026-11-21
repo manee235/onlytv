@@ -1,5 +1,5 @@
 /**
- * Robust M3U and IPTV Playlist Parser for OnlyTV Web Player
+ * Robust M3U and IPTV Playlist Parser for ANKA Web Player
  */
 
 export const DEFAULT_IPTV_URL = "https://iptv-org.github.io/iptv/index.m3u";

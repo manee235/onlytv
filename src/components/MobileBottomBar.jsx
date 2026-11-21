@@ -1,18 +1,14 @@
 import React from 'react';
 import { 
-  Tv, 
   List, 
-  Globe, 
   SkipForward, 
   Info, 
-  Camera,
-  Sparkles
+  Camera 
 } from 'lucide-react';
 
 export default function MobileBottomBar({
   onTogglePlaylist,
   isPlaylistOpen,
-  onOpenStreamModal,
   onOpenInfoModal,
   onNextChannel,
   onTakeSnapshot,
@@ -23,6 +19,7 @@ export default function MobileBottomBar({
       <button 
         className={`mobile-tab-btn ${isPlaylistOpen ? 'active' : ''}`}
         onClick={onTogglePlaylist}
+        aria-label="Channels"
       >
         <div className="mobile-tab-icon-wrap">
           <List size={20} />
@@ -32,18 +29,9 @@ export default function MobileBottomBar({
       </button>
 
       <button 
-        className="mobile-tab-btn primary-action"
-        onClick={onOpenStreamModal}
-      >
-        <div className="mobile-tab-icon-wrap action-bubble">
-          <Globe size={22} />
-        </div>
-        <span>Open Stream</span>
-      </button>
-
-      <button 
         className="mobile-tab-btn"
         onClick={onNextChannel}
+        aria-label="Next Channel"
       >
         <div className="mobile-tab-icon-wrap">
           <SkipForward size={20} />
@@ -54,6 +42,7 @@ export default function MobileBottomBar({
       <button 
         className="mobile-tab-btn"
         onClick={onTakeSnapshot}
+        aria-label="Take Video Snapshot"
       >
         <div className="mobile-tab-icon-wrap">
           <Camera size={20} />
@@ -64,6 +53,7 @@ export default function MobileBottomBar({
       <button 
         className="mobile-tab-btn"
         onClick={onOpenInfoModal}
+        aria-label="Stream Info"
       >
         <div className="mobile-tab-icon-wrap">
           <Info size={20} />

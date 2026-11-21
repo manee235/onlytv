@@ -20,10 +20,10 @@ import {
   List, 
   Layers,
   Sliders,
-  Zap,
-  Gauge
+  Zap
 } from 'lucide-react';
-import appLogo from '../assets/Cyan Blue Winged Play Logo.png';
+import ankaSign from '../assets/anka-sign.png';
+import ankaText from '../assets/anka-logo.png';
 import { getProxiedStreamUrl } from '../utils/m3uParser';
 
 export default function VlcPlayer({
@@ -39,7 +39,7 @@ export default function VlcPlayer({
   onTakeSnapshot,
   videoRef,
   videoEffects = { brightness: 1, contrast: 1, saturate: 1, hue: 0 },
-  cachingMode = 'normal',
+  cachingMode = 'low',
   onChangeCachingMode,
   onOpenEffectsModal
 }) {
@@ -52,6 +52,7 @@ export default function VlcPlayer({
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [needsUserUnmute, setNeedsUserUnmute] = useState(false);
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isLive, setIsLive] = useState(true);
@@ -64,6 +65,63 @@ export default function VlcPlayer({
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
   const hideTimeoutRef = useRef(null);
+  const hasInteractedRef = useRef(false);
+
+  // Global User Gesture Listener to auto-unmute cleanly
+  useEffect(() => {
+    const handleFirstGesture = () => {
+      hasInteractedRef.current = true;
+      setHasUserInteracted(true);
+      if (videoRef.current && videoRef.current.muted && needsUserUnmute) {
+        videoRef.current.muted = false;
+        setIsMuted(false);
+        setNeedsUserUnmute(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', handleFirstGesture, { passive: true });
+    window.addEventListener('keydown', handleFirstGesture, { passive: true });
+    window.addEventListener('touchstart', handleFirstGesture, { passive: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', handleFirstGesture);
+      window.removeEventListener('keydown', handleFirstGesture);
+      window.removeEventListener('touchstart', handleFirstGesture);
+    };
+  }, [needsUserUnmute, videoRef]);
+
+  // Safe Autoplay execution that complies with browser autoplay policy without errors
+  const safeAutoplay = (video) => {
+    if (!video) return;
+
+    // If user has not interacted with page yet, browser strictly requires muted autoplay
+    if (!hasInteractedRef.current) {
+      video.muted = true;
+      setIsMuted(true);
+      setNeedsUserUnmute(true);
+    }
+
+    const promise = video.play();
+    if (promise !== undefined) {
+      promise
+        .then(() => {
+          setIsPlaying(true);
+        })
+        .catch((err) => {
+          // If unmuted attempt was rejected, fallback to muted autoplay silently
+          if (!video.muted) {
+            video.muted = true;
+            setIsMuted(true);
+            setNeedsUserUnmute(true);
+            video.play()
+              .then(() => setIsPlaying(true))
+              .catch(() => setIsPlaying(false));
+          } else {
+            setIsPlaying(false);
+          }
+        });
+    }
+  };
 
   // Initialize and load stream with VLC-grade low-latency network caching
   useEffect(() => {
@@ -92,41 +150,28 @@ export default function VlcPlayer({
                         streamUrl.includes('proxy') ||
                         !streamUrl.match(/\.(mp4|webm|ogg)$/i);
 
-    const attemptAutoplay = () => {
-      video.play().catch(err => {
-        console.warn('Autoplay unmuted blocked by browser policy, switching to muted autoplay:', err);
-        video.muted = true;
-        setIsMuted(true);
-        setNeedsUserUnmute(true);
-        video.play().catch(e => {
-          console.warn('Muted autoplay also prevented:', e);
-          setIsPlaying(false);
-        });
-      });
-    };
-
     if (isHlsStream && Hls.isSupported()) {
       // Configure buffer parameters based on VLC caching mode
       const isLow = cachingMode === 'low';
       const isHigh = cachingMode === 'high';
-      // Balanced healthy buffer thresholds: eliminates buffer starvation on live chunks
-      const bufferLen = isLow ? 10 : isHigh ? 32 : 20;
-      const maxBufferLen = isLow ? 20 : isHigh ? 64 : 40;
+      // Low latency buffering thresholds (300ms - 1500ms edge)
+      const bufferLen = isLow ? 6 : isHigh ? 24 : 12;
+      const maxBufferLen = isLow ? 12 : isHigh ? 48 : 24;
       const syncCount = isLow ? 2 : isHigh ? 4 : 3;
 
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
         
-        // VLC-Style Rapid Caching Configuration
+        // VLC-Style Rapid Caching & Ultra-Low Latency
         maxBufferLength: bufferLen,
         maxMaxBufferLength: maxBufferLen,
-        maxBufferSize: 50 * 1000 * 1000,
+        maxBufferSize: 40 * 1000 * 1000,
         maxBufferHole: 0.5,
         
-        // Live sync cushion: 2-3 segments ensures playback never starves while encoder writes
+        // Live sync cushion: 2 segments ensures playback never starves while encoder writes
         liveSyncDurationCount: syncCount,
-        liveMaxLatencyDurationCount: 8,
+        liveMaxLatencyDurationCount: isLow ? 4 : 6,
         
         // Progressive demuxing & parallel prefetching for zero-latency start
         progressive: true,
@@ -134,21 +179,21 @@ export default function VlcPlayer({
         testBandwidth: false,
         initialLiveManifestSize: 1,
         autoStartLoad: true,
-        backBufferLength: 10,
+        backBufferLength: 4,
         
         // Fast watchdog and playhead nudge on packet gap
         highBufferWatchdogPeriod: 2,
         nudgeOffset: 0.2,
         nudgeMaxRetry: 10,
         
-        manifestLoadingTimeOut: 12000,
-        manifestLoadingMaxRetry: 4,
-        manifestLoadingRetryDelay: 500,
-        levelLoadingTimeOut: 12000,
-        levelLoadingMaxRetry: 4,
-        fragLoadingTimeOut: 15000,
-        fragLoadingMaxRetry: 4,
-        fragLoadingRetryDelay: 500
+        manifestLoadingTimeOut: 8000,
+        manifestLoadingMaxRetry: 3,
+        manifestLoadingRetryDelay: 300,
+        levelLoadingTimeOut: 8000,
+        levelLoadingMaxRetry: 3,
+        fragLoadingTimeOut: 10000,
+        fragLoadingMaxRetry: 3,
+        fragLoadingRetryDelay: 300
       });
 
       hls.loadSource(streamUrl);
@@ -158,18 +203,77 @@ export default function VlcPlayer({
         setIsBuffering(false);
         setHasError(false);
 
-        // Extract available quality levels
+        // Extract available quality levels with user-friendly resolution names (1080p, 720p, 480p, 360p)
         if (data && data.levels && data.levels.length > 0) {
-          const lvls = data.levels.map((lvl, index) => ({
-            id: index,
-            height: lvl.height,
-            bitrate: lvl.bitrate,
-            label: lvl.height ? `${lvl.height}p` : `${Math.round(lvl.bitrate / 1000)}k`
-          }));
+          const lvls = data.levels.map((lvl, index) => {
+            let height = lvl.height || 0;
+            const bitrate = lvl.bitrate || 0;
+            const kbps = Math.round(bitrate / 1000);
+
+            // Infer standard video resolution for non-IT users if height is missing
+            if (!height || height <= 0) {
+              if (kbps >= 2000) {
+                height = 1080;
+              } else if (kbps >= 1300) {
+                height = 720;
+              } else if (kbps >= 800) {
+                height = 480;
+              } else if (kbps >= 450) {
+                height = 360;
+              } else if (kbps > 0) {
+                height = 240;
+              } else if (data.levels.length > 1) {
+                const ratio = index / (data.levels.length - 1);
+                if (ratio >= 0.75) height = 1080;
+                else if (ratio >= 0.5) height = 720;
+                else if (ratio >= 0.25) height = 480;
+                else height = 360;
+              } else {
+                height = 720;
+              }
+            }
+
+            let badge = `${height}p`;
+            let title = `${height}p`;
+
+            if (height >= 2160) {
+              badge = '4K';
+              title = '4K (Ultra HD)';
+            } else if (height >= 1440) {
+              badge = '1440p';
+              title = '1440p (2K HD)';
+            } else if (height >= 1080) {
+              badge = '1080p';
+              title = '1080p (Full HD)';
+            } else if (height >= 720) {
+              badge = '720p';
+              title = '720p (HD)';
+            } else if (height >= 576) {
+              badge = '576p';
+              title = '576p (SD)';
+            } else if (height >= 480) {
+              badge = '480p';
+              title = '480p (Standard)';
+            } else if (height >= 360) {
+              badge = '360p';
+              title = '360p (Medium)';
+            } else {
+              badge = '240p';
+              title = '240p (Data Saver)';
+            }
+
+            return {
+              id: index,
+              height,
+              bitrate,
+              badge,
+              title
+            };
+          });
           setQualityLevels(lvls);
         }
 
-        attemptAutoplay();
+        safeAutoplay(video);
       });
 
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
@@ -189,29 +293,24 @@ export default function VlcPlayer({
       hls.on(Hls.Events.ERROR, (event, data) => {
         if (!data.fatal) return;
 
-        console.warn('Fatal HLS error:', data.type, data.details);
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
-            // If direct stream URL failed on web deployment, automatically failover to proxy!
             if (!attemptedProxyFallback) {
               attemptedProxyFallback = true;
               const fallbackUrl = getProxiedStreamUrl(channel.url, true);
               if (fallbackUrl !== streamUrl) {
-                console.log('Direct stream CORS error on web, switching to fallback proxy:', fallbackUrl);
                 hls.loadSource(fallbackUrl);
                 hls.startLoad();
                 return;
               }
             }
-            console.log('Attempting VLC network recovery...');
             hls.startLoad();
             break;
           case Hls.ErrorTypes.MEDIA_ERROR:
-            console.log('Attempting VLC media error recovery...');
             hls.recoverMediaError();
             break;
           default:
-            setErrorMessage('This channel broadcast is currently offline or geoblocked.');
+            setErrorMessage('This channel broadcast is currently offline or unreachable.');
             setHasError(true);
             setIsBuffering(false);
             hls.destroy();
@@ -222,10 +321,10 @@ export default function VlcPlayer({
       hlsRef.current = hls;
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = streamUrl;
-      attemptAutoplay();
+      safeAutoplay(video);
     } else {
       video.src = streamUrl;
-      attemptAutoplay();
+      safeAutoplay(video);
     }
 
     return () => {
@@ -247,7 +346,6 @@ export default function VlcPlayer({
     const onPause = () => setIsPlaying(false);
     const onWaiting = () => {
       clearTimeout(waitTimer);
-      // Debounce buffering: only show spinner if stalled for more than 400ms
       waitTimer = setTimeout(() => {
         setIsBuffering(true);
       }, 400);
@@ -263,7 +361,6 @@ export default function VlcPlayer({
         setDuration(video.duration);
       }
 
-      // Calculate buffer health in seconds ahead of playhead
       if (video.buffered && video.buffered.length > 0) {
         for (let i = 0; i < video.buffered.length; i++) {
           if (video.buffered.start(i) <= video.currentTime && video.currentTime <= video.buffered.end(i)) {
@@ -332,7 +429,7 @@ export default function VlcPlayer({
       handleUserUnmute();
     }
     if (video.paused) {
-      video.play();
+      video.play().catch(() => {});
     } else {
       video.pause();
     }
@@ -344,6 +441,7 @@ export default function VlcPlayer({
       videoRef.current.volume = Math.min(volume || 1, 1);
       setIsMuted(false);
       setNeedsUserUnmute(false);
+      hasInteractedRef.current = true;
     }
   };
 
@@ -359,6 +457,7 @@ export default function VlcPlayer({
     const val = parseFloat(e.target.value);
     setVolume(val);
     setNeedsUserUnmute(false);
+    hasInteractedRef.current = true;
     if (videoRef.current) {
       videoRef.current.volume = Math.min(val, 1);
       videoRef.current.muted = val === 0;
@@ -369,6 +468,7 @@ export default function VlcPlayer({
   const toggleMute = () => {
     if (videoRef.current) {
       setNeedsUserUnmute(false);
+      hasInteractedRef.current = true;
       const nextMuted = !isMuted;
       videoRef.current.muted = nextMuted;
       setIsMuted(nextMuted);
@@ -394,12 +494,10 @@ export default function VlcPlayer({
   const toggleFullscreen = () => {
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().catch(err => {
-        console.error('Error attempting fullscreen:', err);
-      });
+      containerRef.current.requestFullscreen().catch(() => {});
       setIsFullscreen(true);
     } else {
-      document.exitFullscreen();
+      document.exitFullscreen().catch(() => {});
       setIsFullscreen(false);
     }
   };
@@ -413,9 +511,7 @@ export default function VlcPlayer({
       } else if (document.pictureInPictureEnabled) {
         await video.requestPictureInPicture();
       }
-    } catch (err) {
-      console.warn('PiP error:', err);
-    }
+    } catch {}
   };
 
   const handleSnapshot = () => {
@@ -430,14 +526,13 @@ export default function VlcPlayer({
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const link = document.createElement('a');
-      link.download = `onlytv-snapshot-${channel?.name?.replace(/[^a-z0-9]/gi, '_') || 'stream'}-${Date.now()}.png`;
+      link.download = `anka-snapshot-${channel?.name?.replace(/[^a-z0-9]/gi, '_') || 'stream'}-${Date.now()}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
 
       setSnapshotFlash(true);
       setTimeout(() => setSnapshotFlash(false), 300);
-    } catch (e) {
-      console.error('Snapshot failed:', e);
+    } catch {
       alert('Snapshot failed: Stream origin restrictions prevented screenshot capture.');
     }
   };
@@ -465,7 +560,6 @@ export default function VlcPlayer({
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // Video aspect ratio & effects filter style
   const getVideoStyles = () => {
     const styles = {
       filter: `brightness(${videoEffects.brightness}) contrast(${videoEffects.contrast}) saturate(${videoEffects.saturate}) hue-rotate(${videoEffects.hue}deg)`
@@ -500,14 +594,15 @@ export default function VlcPlayer({
             playsInline
             webkit-playsinline="true"
             crossOrigin="anonymous"
+            muted={isMuted}
           />
         ) : (
           <div className="vlc-empty-stage">
-            <div className="onlytv-hero-wrapper">
-              <img src={appLogo} alt="OnlyTV" className="onlytv-hero-logo" />
+            <div className="anka-hero-wrapper">
+              <img src={ankaSign} alt="ANKA Sign" className="anka-hero-sign" />
+              <img src={ankaText} alt="ANKA TV" className="anka-hero-text" />
             </div>
-            <h2>OnlyTV Web Player</h2>
-            <p>Insert a live streaming link, M3U playlist, or select any channel from the sidebar.</p>
+            <p>Select any channel from the playlist to begin streaming.</p>
           </div>
         )}
 
@@ -517,7 +612,7 @@ export default function VlcPlayer({
             <div className="vlc-spinner"></div>
             <div className="buffer-speed-badge">
               <Zap size={14} className="text-blue" />
-              <span>VLC Fast Buffer Active ({cachingMode === 'low' ? '300ms' : cachingMode === 'high' ? '3000ms' : '1000ms'})</span>
+              <span>VLC Fast Buffer Active ({cachingMode === 'low' ? '300ms Turbo' : cachingMode === 'high' ? '3000ms Stable' : '1000ms Normal'})</span>
             </div>
           </div>
         )}
@@ -603,22 +698,12 @@ export default function VlcPlayer({
                   </button>
 
                   {bufferHealth > 0 && (
-                    <span className="buffer-health-pill" title="VLC Cached Buffer Ahead of Playhead">
+                    <span className="buffer-health-pill hide-mobile" title="VLC Cached Buffer Ahead of Playhead">
                       ⚡ {bufferHealth.toFixed(1)}s cached
                     </span>
                   )}
                 </div>
               </div>
-            </div>
-
-            <div className="top-right-overlay-controls">
-              <button 
-                className={`overlay-icon-btn ${isPlaylistOpen ? 'active' : ''}`}
-                onClick={onTogglePlaylist}
-                title="Channel List"
-              >
-                <List size={18} />
-              </button>
             </div>
           </div>
         )}
@@ -632,7 +717,7 @@ export default function VlcPlayer({
               <div className="live-pill">
                 <span className="live-dot"></span> LIVE BROADCAST
               </div>
-              <div className="live-channel-current">{channel?.name || 'OnlyTV'}</div>
+              <div className="live-channel-current">{channel?.name || 'ANKA'}</div>
             </div>
           ) : (
             <div className="vlc-seek-wrapper">
@@ -659,6 +744,7 @@ export default function VlcPlayer({
               className="vlc-ctrl-btn play-btn"
               onClick={handlePlayPause}
               title={isPlaying ? "Pause (Space)" : "Play (Space)"}
+              aria-label={isPlaying ? "Pause" : "Play"}
             >
               {isPlaying ? <Pause size={18} /> : <Play size={18} />}
             </button>
@@ -667,6 +753,7 @@ export default function VlcPlayer({
               className="vlc-ctrl-btn"
               onClick={handleStop}
               title="Stop (S)"
+              aria-label="Stop"
             >
               <Square size={16} />
             </button>
@@ -675,6 +762,7 @@ export default function VlcPlayer({
               className="vlc-ctrl-btn"
               onClick={onPrevChannel}
               title="Previous Channel (P)"
+              aria-label="Previous Channel"
             >
               <SkipBack size={16} />
             </button>
@@ -683,6 +771,7 @@ export default function VlcPlayer({
               className="vlc-ctrl-btn"
               onClick={onNextChannel}
               title="Next Channel (N)"
+              aria-label="Next Channel"
             >
               <SkipForward size={16} />
             </button>
@@ -694,6 +783,7 @@ export default function VlcPlayer({
                 className="vlc-volume-btn"
                 onClick={toggleMute}
                 title="Mute / Unmute (M)"
+                aria-label="Toggle Mute"
               >
                 {isMuted || volume === 0 ? (
                   <VolumeX size={18} className="text-red" />
@@ -733,7 +823,7 @@ export default function VlcPlayer({
                   title="Stream Quality (Resolution)"
                 >
                   <span className="speed-label">
-                    {currentLevel === -1 ? 'AUTO' : qualityLevels[currentLevel]?.label || 'HD'}
+                    {currentLevel === -1 ? 'AUTO' : qualityLevels.find(l => l.id === currentLevel)?.badge || 'HD'}
                   </span>
                 </button>
                 {showQualityMenu && (
@@ -742,7 +832,8 @@ export default function VlcPlayer({
                       className={currentLevel === -1 ? 'active' : ''}
                       onClick={() => handleSelectQuality(-1)}
                     >
-                      Auto (Adaptive)
+                      <span>Auto (Best Quality)</span>
+                      {currentLevel === -1 && <span className="quality-check">✓</span>}
                     </button>
                     {qualityLevels.map(lvl => (
                       <button 
@@ -750,7 +841,8 @@ export default function VlcPlayer({
                         className={currentLevel === lvl.id ? 'active' : ''}
                         onClick={() => handleSelectQuality(lvl.id)}
                       >
-                        {lvl.label} {lvl.bitrate ? `(${Math.round(lvl.bitrate / 1000)} kbps)` : ''}
+                        <span>{lvl.title}</span>
+                        {currentLevel === lvl.id && <span className="quality-check">✓</span>}
                       </button>
                     ))}
                   </div>

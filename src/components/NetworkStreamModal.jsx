@@ -12,7 +12,7 @@ import {
   Link,
   Tv
 } from 'lucide-react';
-import appLogo from '../assets/Cyan Blue Winged Play Logo.png';
+import ankaLogo from '../assets/anka-logo.png';
 import { SAMPLE_PLAYLISTS, parseM3U, DEFAULT_IPTV_URL } from '../utils/m3uParser';
 
 export default function NetworkStreamModal({
@@ -86,8 +86,8 @@ export default function NetworkStreamModal({
         {/* Modal Header */}
         <div className="vlc-modal-header">
           <div className="modal-title-group">
-            <img src={appLogo} alt="OnlyTV" className="onlytv-modal-logo" />
-            <h2>OnlyTV - Open Media Stream / Playlist</h2>
+            <img src={ankaLogo} alt="ANKA TV" className="anka-modal-logo" />
+            <h2>ANKA - Open Media Stream / Playlist</h2>
           </div>
           <button className="modal-close-btn" onClick={onClose}>
             <X size={18} />
